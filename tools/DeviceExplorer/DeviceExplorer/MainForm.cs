@@ -2,6 +2,7 @@
 using Microsoft.Azure.Devices.Common;
 using Microsoft.Azure.Devices.Common.Security;
 using Microsoft.ServiceBus.Messaging;
+using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -79,6 +80,10 @@ namespace DeviceExplorer
             deleteDeviceButton.Enabled = false;
             sasTokenButton.Enabled = false;
 
+            lvJobs.MultiSelect = false;
+            lvJobs.ScrollBars = ScrollBars.Both;
+
+
         }
 
         /// <summary>
@@ -121,10 +126,10 @@ namespace DeviceExplorer
                 string iotHubName = builder.HostName.Split('.')[0];
                 iotHubNameTextBox.Text = iotHubName;
                 eventHubNameTextBoxForDataTab.Text = iotHubName;
-                
+
                 activeIoTHubConnectionString = connectionString;
             }
-            catch(Exception ex)
+            catch (Exception ex)
             {
                 if (!skipException)
                 {
@@ -136,24 +141,24 @@ namespace DeviceExplorer
         private async Task updateDeviceIdsComboBoxes(bool runIfNullOrEmpty = true)
         {
             if (!String.IsNullOrEmpty(activeIoTHubConnectionString) || runIfNullOrEmpty)
-        {
-            List<string> deviceIdsForEvent = new List<string>();
-            List<string> deviceIdsForC2DMessage = new List<string>();
-            RegistryManager registryManager = RegistryManager.CreateFromConnectionString(activeIoTHubConnectionString);
-
-            var devices = await registryManager.GetDevicesAsync(MAX_COUNT_OF_DEVICES);
-            foreach (var device in devices)
             {
-                deviceIdsForEvent.Add(device.Id);
-                deviceIdsForC2DMessage.Add(device.Id);
-            }
-            await registryManager.CloseAsync();
-            this.deviceIDsComboBoxForEvent.DataSource = deviceIdsForEvent.OrderBy(c => c).ToList();
-            this.deviceIDsComboBoxForCloudToDeviceMessage.DataSource = deviceIdsForC2DMessage.OrderBy(c => c).ToList();
+                List<string> deviceIdsForEvent = new List<string>();
+                List<string> deviceIdsForC2DMessage = new List<string>();
+                RegistryManager registryManager = RegistryManager.CreateFromConnectionString(activeIoTHubConnectionString);
 
-            deviceIDsComboBoxForEvent.SelectedIndex = deviceSelectedIndexForEvent;
-            deviceIDsComboBoxForCloudToDeviceMessage.SelectedIndex = deviceSelectedIndexForC2DMessage;
-        }
+                var devices = await registryManager.GetDevicesAsync(MAX_COUNT_OF_DEVICES);
+                foreach (var device in devices)
+                {
+                    deviceIdsForEvent.Add(device.Id);
+                    deviceIdsForC2DMessage.Add(device.Id);
+                }
+                await registryManager.CloseAsync();
+                this.deviceIDsComboBoxForEvent.DataSource = deviceIdsForEvent.OrderBy(c => c).ToList();
+                this.deviceIDsComboBoxForCloudToDeviceMessage.DataSource = deviceIdsForC2DMessage.OrderBy(c => c).ToList();
+
+                deviceIDsComboBoxForEvent.SelectedIndex = deviceSelectedIndexForEvent;
+                deviceIDsComboBoxForCloudToDeviceMessage.SelectedIndex = deviceSelectedIndexForC2DMessage;
+            }
         }
         private void persistSettingsToAppConfig()
         {
@@ -267,7 +272,7 @@ namespace DeviceExplorer
             var devicesList = await devicesProcessor.GetDevices();
             devicesList.Sort();
             var sortableDevicesBindingList = new SortableBindingList<DeviceEntity>(devicesList);
-            
+
             devicesGridView.DataSource = sortableDevicesBindingList;
             devicesGridView.ReadOnly = true;
             devicesGridView.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
@@ -533,7 +538,7 @@ namespace DeviceExplorer
             {
                 if (checkBox1.Checked)
                 {
-                    if(String.IsNullOrEmpty(textBoxMessage.Text))
+                    if (String.IsNullOrEmpty(textBoxMessage.Text))
                     {
                         cloudToDeviceMessage = DateTime.Now.ToLocalTime().ToString();
                     }
@@ -584,19 +589,69 @@ namespace DeviceExplorer
         }
         #endregion
 
+        #region JobsTab
+
+
+        private async Task OutputRunningJobs(string connectionString)
+        {
+            JobClient deviceJobClient = JobClient.CreateFromConnectionString(connectionString);
+
+            string json = JsonConvert.SerializeObject(
+              new
+              {
+                  filter = new
+                  {
+                      property = new
+                      {
+                          name = "Status",
+                          type = "default"
+                      },
+                      value = "Running",
+                      comparisonOperator = "eq",
+                      type = "comparison"
+                  }
+              }
+            );
+
+
+            JobQueryResult query = await deviceJobClient.QueryJobHistoryJsonAsync(json);
+            if (query.Result.Count() > 0)
+            {
+                var sortableDevicesBindingList = new SortableBindingList<JobResponse>();
+                foreach (JobResponse job in query.Result)
+                {
+                    sortableDevicesBindingList.Add(job);
+                }
+
+
+                lvJobs.DataSource = sortableDevicesBindingList;
+            }
+
+            lvJobs.ReadOnly = true;
+            lvJobs.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
+
+        }
+        #endregion
+
         private async void tabControl1_Selected(object sender, TabControlEventArgs e)
         {
             try
             {
+
                 if (e.TabPage == tabData || e.TabPage == tabMessagesToDevice)
                 {
-                    await updateDeviceIdsComboBoxes(runIfNullOrEmpty:false);
+                    await updateDeviceIdsComboBoxes(runIfNullOrEmpty: false);
                 }
 
-                if (e.TabPage == tabManagement)
+                else if (e.TabPage == tabManagement)
                 {
                     UpdateListOfDevices();
                 }
+                else if (e.TabPage == tabJobs)
+                {
+                    await OutputRunningJobs(activeIoTHubConnectionString);
+                }
+
             }
             catch (Exception ex)
             {
@@ -779,5 +834,58 @@ namespace DeviceExplorer
                 }
             }
         }
+
+        private async void btnRefresh_Click(object sender, EventArgs e)
+        {
+            await OutputRunningJobs(activeIoTHubConnectionString);
+        }
+
+        private async void MnuCancel_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                string selectedJob = lvJobs.CurrentRow.Cells[0].Value.ToString();
+
+                JobClient deviceJobClient = JobClient.CreateFromConnectionString(activeIoTHubConnectionString);
+                var job = await deviceJobClient.GetJobAsync(selectedJob);
+
+                if (job.Status == JobStatus.Running)
+                    await deviceJobClient.CancelJobAsync(job.JobId);
+
+                await OutputRunningJobs(activeIoTHubConnectionString);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, ex.ToString(), "Error");
+            }
+
+        }
+
+
+        private async void MnuRefresh_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                string selectedJob = lvJobs.CurrentRow.Cells[0].Value.ToString();
+
+                JobClient deviceJobClient = JobClient.CreateFromConnectionString(activeIoTHubConnectionString);
+                var job = await deviceJobClient.GetJobAsync(selectedJob);
+
+                //update this row... cell mapping       
+                lvJobs.CurrentRow.Cells[4].Value = job.Status;
+                lvJobs.CurrentRow.Cells[5].Value = job.FailureReason;
+                lvJobs.CurrentRow.Cells[6].Value = job.StatusMessage;
+                lvJobs.CurrentRow.Cells[7].Value = job.DeviceId;
+                lvJobs.CurrentRow.Cells[8].Value = job.ParentJobId;
+
+
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, ex.ToString(), "Error");
+            }
+
+        }
+
     }
 }
