@@ -1,0 +1,1 @@
+﻿HostName=sim-dev.azure-devices.net;DeviceId=sim0001;SharedAccessKeyName=iothubowner;SharedAccessKey=<replace>

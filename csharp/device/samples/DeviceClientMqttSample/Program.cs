@@ -67,8 +67,8 @@ namespace Microsoft.Azure.Devices.Client.Samples
             Console.WriteLine("\nDevice waiting for commands from IoTHub...\n");
             Message receivedMessage = null;
             string messageData;
-
-            while (true)
+            bool running = true;
+            while (running)
             {
                 try
                 {
@@ -80,6 +80,9 @@ namespace Microsoft.Azure.Devices.Client.Samples
                         Console.WriteLine("\t{0}> Received message: {1}", DateTime.Now.ToLocalTime(), messageData);
 
                         await deviceClient.CompleteAsync(receivedMessage);
+
+                        if (messageData == "Exit")
+                            running = false;
                     }
                 }
                 finally

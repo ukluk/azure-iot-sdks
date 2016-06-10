@@ -54,7 +54,7 @@ namespace ExecuteFirmwareUpdate
 
 
                 // Start the update job on all devices
-                var jobResponse = await deviceJobClient.ScheduleFirmwareUpdateAsync(Guid.NewGuid().ToString(), deviceIds, packageURI, TimeSpan.FromMinutes(25));
+                var jobResponse = await deviceJobClient.ScheduleFirmwareUpdateAsync(Guid.NewGuid().ToString(), deviceIds, packageURI, TimeSpan.FromSeconds(60));
 
                 // Poll for job completion
                 while (jobResponse.Status == JobStatus.Enqueued ||
